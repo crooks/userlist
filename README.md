@@ -1,2 +1,2 @@
-# users
-Display info about Linux user accounts across multiple hosts
+# userlist
+Produce a CSV of user accounts across multiple Linux servers.
