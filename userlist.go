@@ -317,18 +317,26 @@ func main() {
 			Warn.Printf("%s: %s", k, err)
 			continue
 		}
+		Info.Printf("Imported private key from %s", k)
 		validKeys++
 	}
-	if validKeys == 0 {
+	if validKeys > 0 {
+		Info.Printf("Successfully imported %d private keys", validKeys)
+	} else {
 		Error.Println("No valid private keys found")
 		os.Exit(1)
 	}
 	hostsParsed := 0
 	totalT0 := time.Now()
 	for _, hostName := range hosts.hostNames {
+		Info.Printf("Processing host: %s", hostName)
 		hostShort := strings.Split(hostName, ".")[0]
 		hostT0 := time.Now()
 		client, err := sshSession.Auth(hostName)
+		if err != nil {
+			Warn.Printf("SSH authentication returned: %s", err)
+			continue
+		}
 		b, err = sshSession.Cmd(client, "cat /etc/passwd")
 		if err != nil {
 			Warn.Printf("%s", err)
