@@ -4,22 +4,30 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"io/ioutil"
-	"log"
+	"io"
+	"net/http"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/Masterminds/log-go"
+	"github.com/crooks/jlog"
 	"github.com/crooks/sshcmds"
+	"github.com/crooks/userlist/config"
+)
+
+var (
+	cfg   *config.Config
+	flags *config.Flags
 )
 
 type hostsInfo struct {
-	hostFile  string
 	hostNames []string
 	users     map[string]map[string]userInfo
 	allUsers  []string
+	uidMap    map[int][]string
 }
 
 type userInfo struct {
@@ -42,11 +50,11 @@ func newUser(uid int, passwd, name, shell string) *userInfo {
 	}
 }
 
-// newHosts returns a partially populated hostsInfo struct
+// newHosts constructs a new instance of hostsInfo
 func newHosts(hostFile string) *hostsInfo {
 	return &hostsInfo{
-		hostFile: hostFile,
-		users:    make(map[string]map[string]userInfo),
+		users:  make(map[string]map[string]userInfo),
+		uidMap: make(map[int][]string),
 	}
 }
 
@@ -94,7 +102,7 @@ func (h *hostsInfo) parsePasswd(hostName string, b bytes.Buffer) {
 		shellWords := strings.Split(shell, "/")
 		shellName := shellWords[len(shellWords)-1]
 		if stringInSlice(shellName, unwantedShells) {
-			Trace.Printf(
+			log.Tracef(
 				"Skipping unwanted shell: host=%s, user=%s, shell=%s",
 				hostName,
 				userName,
@@ -107,8 +115,13 @@ func (h *hostsInfo) parsePasswd(hostName string, b bytes.Buffer) {
 		// Convert the uid field to an integer
 		uid, err := strconv.Atoi(fields[2])
 		if err != nil {
-			Warn.Printf("%s: UID cannot be converted to integer", fields[2])
+			log.Warnf("%s: UID cannot be converted to integer", fields[2])
 			continue
+		}
+		// Populate the UID Map
+		if !stringInSlice(userName, h.uidMap[uid]) {
+			log.Debugf("%d: Adding %s to UID map", uid, userName)
+			h.uidMap[uid] = append(h.uidMap[uid], userName)
 		}
 		// Make a (hopefully not too bold) choice that the first (CSV)
 		// comment field is the user's real name.
@@ -154,8 +167,8 @@ func (h *hostsInfo) parseShadow(hostName string, b bytes.Buffer) {
 		// Attempt to convert the third field to a Unix Epoch time
 		pwchg, err := stringToEpoch(fields[2])
 		if err != nil {
-			Warn.Printf(
-				"Hostname=%s, User=%s: Unable to parse Epoch of: %s",
+			log.Warnf(
+				"Hostname=%s, User=%s, Filename=/etc/shadow: Unable to parse Epoch of: %s",
 				hostName,
 				user,
 				fields[2],
@@ -206,29 +219,72 @@ func (h *hostsInfo) parseLast(hostName string, b bytes.Buffer) {
 			h.users[hostName][user] = u
 		}
 	}
-	return
 }
 
-// readHostNames iterates over file containing hostnames and populates a list.
-func (h *hostsInfo) readHostNames(filename string) {
-	file, err := os.Open(filename)
+// nonBlankName iterates through all known hosts looking for a specified
+// userName.  If it finds one, it checks that the corresponding name field in
+// the users struct (The comments field in /etc/passwd) is not blank.  If this
+// is true, the name is returned as a string.
+func (h *hostsInfo) nonBlankName(userName string) string {
+	for _, host := range h.hostNames {
+		// Test if this host has an entry for the specified userName
+		if _, ok := h.users[host][userName]; ok {
+			if len(h.users[host][userName].name) > 0 {
+				// The userName is good and the name field has some content.
+				return h.users[host][userName].name
+			}
+		}
+	}
+	// Give up.  Unlikely as it seems, no hits were found.
+	return ""
+}
+
+// writeMapToFile produces two files.  One of conflicting UIDs and one of
+// correct, unique UIDs.
+func (h *hostsInfo) writeMapToFile(collisionsCSV, mapCSV string) {
+	// Create and open the UID Collisions file
+	csvc, err := os.Create(collisionsCSV)
 	if err != nil {
-		log.Fatal("Unable to open " + err.Error())
+		log.Fatalf("Unable to write collisionsCSV: %s", err)
 	}
-	defer file.Close()
-	h.hostFile = filename
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		h.hostNames = append(h.hostNames, scanner.Text())
+	defer csvc.Close()
+	bufc := bufio.NewWriter(csvc)
+	// Create and open the UID Map file
+	csvm, err := os.Create(mapCSV)
+	if err != nil {
+		log.Fatalf("Unable to write mapCSV: %s", err)
 	}
-	Info.Printf("Read %d hostnames from %s", len(h.hostNames), filename)
+	defer csvm.Close()
+	bufm := bufio.NewWriter(csvm)
+	// Create a slice of uid keys for sorting purposes
+	keys := make([]int, 0, len(h.uidMap))
+	for k := range h.uidMap {
+		keys = append(keys, k)
+	}
+	sort.Ints(keys)
+	// Iterate through all the discovered UIDs.  If there is >1 associated
+	// userNames, write the UID to file.
+	for _, uid := range keys {
+		if len(h.uidMap[uid]) > 1 {
+			// UID collisions
+			line := fmt.Sprintf("%d,%s\n", uid, strings.Join(h.uidMap[uid], ","))
+			bufc.WriteString(line)
+		} else {
+			// Good UIDs
+			userName := h.uidMap[uid][0]
+			line := fmt.Sprintf("%d,%s,%s\n", uid, userName, h.nonBlankName(userName))
+			bufm.WriteString(line)
+		}
+	}
+	bufc.Flush()
+	bufm.Flush()
 }
 
 // writeToFile exports the map of hosts/users to a CSV file.
 func (h *hostsInfo) writeToFile(filename string) {
 	f, err := os.Create(filename)
 	if err != nil {
-		log.Fatalf("Unable to write output: %s", err)
+		log.Fatalf("Unable to write OutFileCSV: %s", err)
 	}
 	defer f.Close()
 	w := bufio.NewWriter(f)
@@ -268,100 +324,103 @@ func (h *hostsInfo) writeToFile(filename string) {
 	w.Flush()
 }
 
+// readPrivateKeys takes a slice of filenames relating to SSH private key files.
+// It returns an instance of sshcmds populated with valid private keys.
+func readPrivateKeys(keyFileNames []string) *sshcmds.Config {
+	sshSession := sshcmds.NewConfig()
+	validKeys := 0
+	for _, k := range keyFileNames {
+		err := sshSession.AddKey(cfg.SSHUser, k)
+		if err != nil {
+			log.Warnf("%s: %s", k, err)
+			continue
+		}
+		log.Infof("Imported private key from %s", k)
+		validKeys++
+	}
+	if validKeys > 0 {
+		log.Infof("Successfully imported %d private keys", validKeys)
+	} else {
+		log.Fatal("No valid private keys found")
+	}
+	return sshSession
+}
+
 func main() {
 	var err error
 	// Reading the config has to happen first.  It determines the loglevel and
 	// logpath.
-	setCfg()
-	// Attempt to open the logfile, check it for errors and defer its closure.
-	logfile, err := os.OpenFile(
-		cfg.LogFile,
-		os.O_RDWR|os.O_CREATE|os.O_APPEND,
-		0640,
-	)
+	flags = config.ParseFlags()
+	cfg, err = config.ParseConfig(flags.Config)
 	if err != nil {
-		fmt.Fprintf(
-			os.Stderr,
-			"Error opening logfile: %s.\n",
-			err,
-		)
-		os.Exit(1)
+		log.Fatalf("Unable to parse config: %v", err)
 	}
-	defer logfile.Close()
-	// Initialize logging with our desired log levels.
-	switch strings.ToLower(cfg.LogLevel) {
-	case "trace":
-		logInit(logfile, logfile, logfile, logfile)
-	case "info":
-		logInit(ioutil.Discard, logfile, logfile, logfile)
-	case "warn":
-		logInit(ioutil.Discard, ioutil.Discard, logfile, logfile)
-	case "error":
-		logInit(ioutil.Discard, ioutil.Discard, ioutil.Discard, logfile)
-	default:
-		fmt.Fprintf(
-			os.Stderr,
-			"Unknown loglevel: %s.  Assuming \"Info\".\n",
-			cfg.LogLevel,
-		)
-		logInit(ioutil.Discard, logfile, logfile, logfile)
+	// With a config in place, logging can now be configured.
+	loglevel, err := log.ParseLevel(cfg.LogLevel)
+	if err != nil {
+		log.Fatalf("Unable to parse log level: %v", err)
 	}
+	log.Current = jlog.NewJournal(loglevel)
+
+	// Create an sshSession and import Private keys into it.
+	sshSession := readPrivateKeys(cfg.PrivateKeys)
+
+	// Create a new instance of hostsInfo
 	hosts := newHosts(cfg.ServerList)
-	hosts.readHostNames(cfg.ServerList)
 	var b bytes.Buffer
-	sshSession := sshcmds.NewConfig()
-	validKeys := 0
-	for _, k := range cfg.PrivateKeys {
-		err := sshSession.AddKey(cfg.SSHUser, k)
-		if err != nil {
-			Warn.Printf("%s: %s", k, err)
-			continue
-		}
-		Info.Printf("Imported private key from %s", k)
-		validKeys++
-	}
-	if validKeys > 0 {
-		Info.Printf("Successfully imported %d private keys", validKeys)
-	} else {
-		Error.Println("No valid private keys found")
-		os.Exit(1)
-	}
 	hostsParsed := 0
+	HostsSuccess := 0
 	totalT0 := time.Now()
-	for _, hostName := range hosts.hostNames {
-		Info.Printf("Processing host: %s", hostName)
-		hostShort := strings.Split(hostName, ".")[0]
-		hostT0 := time.Now()
-		client, err := sshSession.Auth(hostName)
+	var source io.ReadCloser
+	if strings.HasPrefix(cfg.ServerList, "http://") || strings.HasPrefix(cfg.ServerList, "https://") {
+		url, err := http.Get(cfg.ServerList)
 		if err != nil {
-			Warn.Printf("SSH authentication returned: %s", err)
+			log.Fatalf("Unable to read hosts URL: %v", err)
+		}
+		source = url.Body
+	} else {
+		source, err = os.Open(cfg.ServerList)
+		if err != nil {
+			log.Fatalf("Unable to open hosts file: %v", err)
+		}
+	}
+	defer source.Close()
+	scanner := bufio.NewScanner(source)
+	for scanner.Scan() {
+		hostsParsed++
+		hostShort := strings.Split(scanner.Text(), ".")[0]
+		log.Infof("Processing host: %s", hostShort)
+		hostT0 := time.Now()
+		client, err := sshSession.Auth(hostShort)
+		if err != nil {
+			log.Warnf("SSH authentication returned: %s", err)
 			continue
 		}
 		b, err = sshSession.Cmd(client, "cat /etc/passwd")
 		if err != nil {
-			Warn.Printf("%s", err)
+			log.Warnf("%s", err)
 			continue
 		}
 		hosts.parsePasswd(hostShort, b)
 
 		b, err = sshSession.Cmd(client, "sudo cat /etc/shadow")
 		if err != nil {
-			Warn.Printf("%s", err)
+			log.Warnf("%s", err)
 			continue
 		}
 		hosts.parseShadow(hostShort, b)
 
 		b, err = sshSession.Cmd(client, "last -aF")
 		if err != nil {
-			Warn.Printf("%s", err)
+			log.Warnf("%s", err)
 			continue
 		}
 		client.Close()
 		hosts.parseLast(hostShort, b)
 		hostT1 := time.Now()
 		hostDuration := hostT1.Sub(hostT0)
-		hostsParsed++
-		Info.Printf(
+		HostsSuccess++
+		log.Infof(
 			"%s: Parsed in %.2f seconds",
 			hostShort,
 			hostDuration.Seconds(),
@@ -369,13 +428,14 @@ func main() {
 	}
 	totalT1 := time.Now()
 	totalDuration := totalT1.Sub(totalT0)
-	Info.Printf(
+	log.Infof(
 		"Successfully parsed %d hosts out of %d in %.1f seconds",
+		HostsSuccess,
 		hostsParsed,
-		len(hosts.hostNames),
 		totalDuration.Seconds(),
 	)
 
 	// Write the gathered user data to a file
 	hosts.writeToFile(cfg.OutFileCSV)
+	hosts.writeMapToFile(cfg.CollisionsCSV, cfg.UIDMapCSV)
 }
