@@ -42,12 +42,13 @@ func newUser(uid int, passwd, name, shell string) *userInfo {
 	}
 }
 
-// newHosts returns a partially populated hostsInfo struct
+// newHosts constructs a new instance of hostsInfo
 func newHosts(hostFile string) *hostsInfo {
-	return &hostsInfo{
-		hostFile: hostFile,
-		users:    make(map[string]map[string]userInfo),
-	}
+	h := new(hostsInfo)
+	h.hostFile = hostFile
+	h.users = make(map[string]map[string]userInfo)
+	h.readHostNames()
+	return h
 }
 
 // stringInSlice returns true if string(s) is a member of slice(list).
@@ -206,22 +207,20 @@ func (h *hostsInfo) parseLast(hostName string, b bytes.Buffer) {
 			h.users[hostName][user] = u
 		}
 	}
-	return
 }
 
 // readHostNames iterates over file containing hostnames and populates a list.
-func (h *hostsInfo) readHostNames(filename string) {
-	file, err := os.Open(filename)
+func (h *hostsInfo) readHostNames() {
+	file, err := os.Open(h.hostFile)
 	if err != nil {
 		log.Fatal("Unable to open " + err.Error())
 	}
 	defer file.Close()
-	h.hostFile = filename
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		h.hostNames = append(h.hostNames, scanner.Text())
 	}
-	Info.Printf("Read %d hostnames from %s", len(h.hostNames), filename)
+	Info.Printf("Read %d hostnames from %s", len(h.hostNames), h.hostFile)
 }
 
 // writeToFile exports the map of hosts/users to a CSV file.
@@ -307,7 +306,6 @@ func main() {
 		logInit(ioutil.Discard, logfile, logfile, logfile)
 	}
 	hosts := newHosts(cfg.ServerList)
-	hosts.readHostNames(cfg.ServerList)
 	var b bytes.Buffer
 	sshSession := sshcmds.NewConfig()
 	validKeys := 0
