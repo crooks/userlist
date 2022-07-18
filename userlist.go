@@ -13,6 +13,12 @@ import (
 	"time"
 
 	"github.com/crooks/sshcmds"
+	"github.com/crooks/userlist/config"
+)
+
+var (
+	cfg   *config.Config
+	flags *config.Flags
 )
 
 type hostsInfo struct {
@@ -271,7 +277,9 @@ func main() {
 	var err error
 	// Reading the config has to happen first.  It determines the loglevel and
 	// logpath.
-	setCfg()
+	flags = config.ParseFlags()
+	cfg = config.ParseConfig()
+
 	// Attempt to open the logfile, check it for errors and defer its closure.
 	logfile, err := os.OpenFile(
 		cfg.LogFile,
