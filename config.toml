@@ -1,6 +1,0 @@
-PrivateKeys = [
-    "crooks", "/home/crooks/.ssh/openwrt"
-    "/home/crooks/.ssh/id_nopass",
-]
-ServerList = "servers.txt"
-OutFileCSV = "userlist.csv"

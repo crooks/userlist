@@ -26,9 +26,18 @@ type Config struct {
 	SSHUser     string   `yaml:"ssh_user"`
 }
 
+func NewConfig() *Config {
+	progPath := expandTilde("~/userlist")
+	return &Config{
+		LogFile:    path.Join(progPath, "userlist.log"),
+		LogLevel:   "Info",
+		OutFileCSV: path.Join(progPath, "userlist.csv"),
+		SSHTimeout: "10s",
+	}
+}
+
 func ParseConfig(filename string) (*Config, error) {
-	config := &Config{}
-	config.PrivateKeys = []string{expandTilde("~/.ssh/ed25519")}
+	config := NewConfig()
 	if filename != "" {
 		file, err := os.Open(filename)
 		if err != nil {

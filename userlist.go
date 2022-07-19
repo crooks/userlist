@@ -4,14 +4,14 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"io/ioutil"
-	"log"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/Masterminds/log-go"
+	"github.com/crooks/jlog"
 	"github.com/crooks/sshcmds"
 	"github.com/crooks/userlist/config"
 )
@@ -101,7 +101,7 @@ func (h *hostsInfo) parsePasswd(hostName string, b bytes.Buffer) {
 		shellWords := strings.Split(shell, "/")
 		shellName := shellWords[len(shellWords)-1]
 		if stringInSlice(shellName, unwantedShells) {
-			Trace.Printf(
+			log.Tracef(
 				"Skipping unwanted shell: host=%s, user=%s, shell=%s",
 				hostName,
 				userName,
@@ -114,7 +114,7 @@ func (h *hostsInfo) parsePasswd(hostName string, b bytes.Buffer) {
 		// Convert the uid field to an integer
 		uid, err := strconv.Atoi(fields[2])
 		if err != nil {
-			Warn.Printf("%s: UID cannot be converted to integer", fields[2])
+			log.Warnf("%s: UID cannot be converted to integer", fields[2])
 			continue
 		}
 		// Make a (hopefully not too bold) choice that the first (CSV)
@@ -161,7 +161,7 @@ func (h *hostsInfo) parseShadow(hostName string, b bytes.Buffer) {
 		// Attempt to convert the third field to a Unix Epoch time
 		pwchg, err := stringToEpoch(fields[2])
 		if err != nil {
-			Warn.Printf(
+			log.Warnf(
 				"Hostname=%s, User=%s: Unable to parse Epoch of: %s",
 				hostName,
 				user,
@@ -226,7 +226,7 @@ func (h *hostsInfo) readHostNames() {
 	for scanner.Scan() {
 		h.hostNames = append(h.hostNames, scanner.Text())
 	}
-	Info.Printf("Read %d hostnames from %s", len(h.hostNames), h.hostFile)
+	log.Infof("Read %d hostnames from %s", len(h.hostNames), h.hostFile)
 }
 
 // writeToFile exports the map of hosts/users to a CSV file.
@@ -278,41 +278,17 @@ func main() {
 	// Reading the config has to happen first.  It determines the loglevel and
 	// logpath.
 	flags = config.ParseFlags()
-	cfg = config.ParseConfig()
-
-	// Attempt to open the logfile, check it for errors and defer its closure.
-	logfile, err := os.OpenFile(
-		cfg.LogFile,
-		os.O_RDWR|os.O_CREATE|os.O_APPEND,
-		0640,
-	)
+	cfg, err = config.ParseConfig(flags.Config)
 	if err != nil {
-		fmt.Fprintf(
-			os.Stderr,
-			"Error opening logfile: %s.\n",
-			err,
-		)
-		os.Exit(1)
+		log.Fatalf("Unable to parse config: %v", err)
 	}
-	defer logfile.Close()
-	// Initialize logging with our desired log levels.
-	switch strings.ToLower(cfg.LogLevel) {
-	case "trace":
-		logInit(logfile, logfile, logfile, logfile)
-	case "info":
-		logInit(ioutil.Discard, logfile, logfile, logfile)
-	case "warn":
-		logInit(ioutil.Discard, ioutil.Discard, logfile, logfile)
-	case "error":
-		logInit(ioutil.Discard, ioutil.Discard, ioutil.Discard, logfile)
-	default:
-		fmt.Fprintf(
-			os.Stderr,
-			"Unknown loglevel: %s.  Assuming \"Info\".\n",
-			cfg.LogLevel,
-		)
-		logInit(ioutil.Discard, logfile, logfile, logfile)
+
+	loglevel, err := log.ParseLevel(cfg.LogLevel)
+	if err != nil {
+		log.Fatalf("Unable to parse log level: %v", err)
 	}
+	log.Current = jlog.NewJournal(loglevel)
+
 	hosts := newHosts(cfg.ServerList)
 	var b bytes.Buffer
 	sshSession := sshcmds.NewConfig()
@@ -320,46 +296,46 @@ func main() {
 	for _, k := range cfg.PrivateKeys {
 		err := sshSession.AddKey(cfg.SSHUser, k)
 		if err != nil {
-			Warn.Printf("%s: %s", k, err)
+			log.Warnf("%s: %s", k, err)
 			continue
 		}
-		Info.Printf("Imported private key from %s", k)
+		log.Infof("Imported private key from %s", k)
 		validKeys++
 	}
 	if validKeys > 0 {
-		Info.Printf("Successfully imported %d private keys", validKeys)
+		log.Infof("Successfully imported %d private keys", validKeys)
 	} else {
-		Error.Println("No valid private keys found")
+		log.Error("No valid private keys found")
 		os.Exit(1)
 	}
 	hostsParsed := 0
 	totalT0 := time.Now()
 	for _, hostName := range hosts.hostNames {
-		Info.Printf("Processing host: %s", hostName)
+		log.Infof("Processing host: %s", hostName)
 		hostShort := strings.Split(hostName, ".")[0]
 		hostT0 := time.Now()
 		client, err := sshSession.Auth(hostName)
 		if err != nil {
-			Warn.Printf("SSH authentication returned: %s", err)
+			log.Warnf("SSH authentication returned: %s", err)
 			continue
 		}
 		b, err = sshSession.Cmd(client, "cat /etc/passwd")
 		if err != nil {
-			Warn.Printf("%s", err)
+			log.Warnf("%s", err)
 			continue
 		}
 		hosts.parsePasswd(hostShort, b)
 
 		b, err = sshSession.Cmd(client, "sudo cat /etc/shadow")
 		if err != nil {
-			Warn.Printf("%s", err)
+			log.Warnf("%s", err)
 			continue
 		}
 		hosts.parseShadow(hostShort, b)
 
 		b, err = sshSession.Cmd(client, "last -aF")
 		if err != nil {
-			Warn.Printf("%s", err)
+			log.Warnf("%s", err)
 			continue
 		}
 		client.Close()
@@ -367,7 +343,7 @@ func main() {
 		hostT1 := time.Now()
 		hostDuration := hostT1.Sub(hostT0)
 		hostsParsed++
-		Info.Printf(
+		log.Infof(
 			"%s: Parsed in %.2f seconds",
 			hostShort,
 			hostDuration.Seconds(),
@@ -375,7 +351,7 @@ func main() {
 	}
 	totalT1 := time.Now()
 	totalDuration := totalT1.Sub(totalT0)
-	Info.Printf(
+	log.Infof(
 		"Successfully parsed %d hosts out of %d in %.1f seconds",
 		hostsParsed,
 		len(hosts.hostNames),
