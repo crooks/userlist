@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"io/ioutil"
+	"net/http"
 	"os"
 	"sort"
 	"strconv"
@@ -22,10 +24,10 @@ var (
 )
 
 type hostsInfo struct {
-	hostFile  string
-	hostNames []string
-	users     map[string]map[string]userInfo
-	allUsers  []string
+	hostSource string
+	hostNames  []string
+	users      map[string]map[string]userInfo
+	allUsers   []string
 }
 
 type userInfo struct {
@@ -51,9 +53,9 @@ func newUser(uid int, passwd, name, shell string) *userInfo {
 // newHosts constructs a new instance of hostsInfo
 func newHosts(hostFile string) *hostsInfo {
 	h := new(hostsInfo)
-	h.hostFile = hostFile
+	h.hostSource = hostFile
 	h.users = make(map[string]map[string]userInfo)
-	h.readHostNames()
+	h.fileToHosts()
 	return h
 }
 
@@ -215,18 +217,33 @@ func (h *hostsInfo) parseLast(hostName string, b bytes.Buffer) {
 	}
 }
 
-// readHostNames iterates over file containing hostnames and populates a list.
-func (h *hostsInfo) readHostNames() {
-	file, err := os.Open(h.hostFile)
+// fileToHosts iterates over file containing hostnames and populates a list.
+func (h *hostsInfo) fileToHosts() {
+	file, err := os.Open(h.hostSource)
 	if err != nil {
-		log.Fatal("Unable to open " + err.Error())
+		log.Fatalf("Unable to open hosts file: %v", err)
 	}
 	defer file.Close()
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		h.hostNames = append(h.hostNames, scanner.Text())
 	}
-	log.Infof("Read %d hostnames from %s", len(h.hostNames), h.hostFile)
+	log.Infof("Read %d hostnames from %s", len(h.hostNames), h.hostSource)
+}
+
+// urlToHosts takes a url, retrieves it and populates the hostnames list
+func (h *hostsInfo) urlToHosts(url string) error {
+	res, err := http.Get(url)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	h.hostSource = url
+	h.hostNames, err = ioutil.ReadAll(res.Body)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // writeToFile exports the map of hosts/users to a CSV file.
