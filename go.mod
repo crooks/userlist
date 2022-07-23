@@ -4,7 +4,7 @@ go 1.18
 
 require (
 	github.com/Masterminds/log-go v1.0.0
-	github.com/crooks/jlog v0.0.0-20220719221124-6ebc00b9f103
+	github.com/crooks/jlog v0.0.0-20220722131440-a145743cbde6
 	github.com/crooks/sshcmds v0.0.0-20201114194206-3279c632edf8
 	gopkg.in/yaml.v3 v3.0.1
 )

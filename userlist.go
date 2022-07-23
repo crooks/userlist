@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"os"
 	"sort"
@@ -24,10 +24,8 @@ var (
 )
 
 type hostsInfo struct {
-	hostSource string
-	hostNames  []string
-	users      map[string]map[string]userInfo
-	allUsers   []string
+	users    map[string]map[string]userInfo
+	allUsers []string
 }
 
 type userInfo struct {
@@ -53,9 +51,7 @@ func newUser(uid int, passwd, name, shell string) *userInfo {
 // newHosts constructs a new instance of hostsInfo
 func newHosts(hostFile string) *hostsInfo {
 	h := new(hostsInfo)
-	h.hostSource = hostFile
 	h.users = make(map[string]map[string]userInfo)
-	h.fileToHosts()
 	return h
 }
 
@@ -217,35 +213,6 @@ func (h *hostsInfo) parseLast(hostName string, b bytes.Buffer) {
 	}
 }
 
-// fileToHosts iterates over file containing hostnames and populates a list.
-func (h *hostsInfo) fileToHosts() {
-	file, err := os.Open(h.hostSource)
-	if err != nil {
-		log.Fatalf("Unable to open hosts file: %v", err)
-	}
-	defer file.Close()
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		h.hostNames = append(h.hostNames, scanner.Text())
-	}
-	log.Infof("Read %d hostnames from %s", len(h.hostNames), h.hostSource)
-}
-
-// urlToHosts takes a url, retrieves it and populates the hostnames list
-func (h *hostsInfo) urlToHosts(url string) error {
-	res, err := http.Get(url)
-	if err != nil {
-		return err
-	}
-	defer res.Body.Close()
-	h.hostSource = url
-	h.hostNames, err = ioutil.ReadAll(res.Body)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
 // writeToFile exports the map of hosts/users to a CSV file.
 func (h *hostsInfo) writeToFile(filename string) {
 	f, err := os.Create(filename)
@@ -322,16 +289,32 @@ func main() {
 	if validKeys > 0 {
 		log.Infof("Successfully imported %d private keys", validKeys)
 	} else {
-		log.Error("No valid private keys found")
-		os.Exit(1)
+		log.Fatal("No valid private keys found")
 	}
 	hostsParsed := 0
+	HostsSuccess := 0
 	totalT0 := time.Now()
-	for _, hostName := range hosts.hostNames {
-		log.Infof("Processing host: %s", hostName)
-		hostShort := strings.Split(hostName, ".")[0]
+	var source io.ReadCloser
+	if strings.HasPrefix(cfg.ServerList, "http://") || strings.HasPrefix(cfg.ServerList, "https://") {
+		url, err := http.Get(cfg.ServerList)
+		if err != nil {
+			log.Fatalf("Unable to read hosts URL: %v", err)
+		}
+		source = url.Body
+	} else {
+		source, err = os.Open(cfg.ServerList)
+		if err != nil {
+			log.Fatalf("Unable to open hosts file: %v", err)
+		}
+	}
+	defer source.Close()
+	scanner := bufio.NewScanner(source)
+	for scanner.Scan() {
+		hostsParsed++
+		hostShort := strings.Split(scanner.Text(), ".")[0]
+		log.Infof("Processing host: %s", hostShort)
 		hostT0 := time.Now()
-		client, err := sshSession.Auth(hostName)
+		client, err := sshSession.Auth(hostShort)
 		if err != nil {
 			log.Warnf("SSH authentication returned: %s", err)
 			continue
@@ -359,7 +342,7 @@ func main() {
 		hosts.parseLast(hostShort, b)
 		hostT1 := time.Now()
 		hostDuration := hostT1.Sub(hostT0)
-		hostsParsed++
+		HostsSuccess++
 		log.Infof(
 			"%s: Parsed in %.2f seconds",
 			hostShort,
@@ -370,8 +353,8 @@ func main() {
 	totalDuration := totalT1.Sub(totalT0)
 	log.Infof(
 		"Successfully parsed %d hosts out of %d in %.1f seconds",
+		HostsSuccess,
 		hostsParsed,
-		len(hosts.hostNames),
 		totalDuration.Seconds(),
 	)
 

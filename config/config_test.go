@@ -16,16 +16,21 @@ func TestConfig(t *testing.T) {
 	fakeCfg := new(Config)
 	fakeKey := path.Join(expandTilde("~"), ".ssh/ed25519")
 	fakeCfg.PrivateKeys = []string{fakeKey}
+	fakeCfg.ServerList = "dummy"
+	fakeCfg.SSHUser = "dummy"
 	fakeCfg.WriteConfig(testFile.Name())
-	cfg, err := ParseConfig("")
+	cfg, err := ParseConfig(testFile.Name())
 	if err != nil {
-		t.Fatal("Unable to parse config")
+		t.Fatalf("Unable to parse config: %v", err)
 	}
 	if len(cfg.PrivateKeys) != 1 {
 		t.Errorf("Expected a single default private key. Got %d.", len(cfg.PrivateKeys))
 	}
 	if cfg.PrivateKeys[0] != fakeCfg.PrivateKeys[0] {
 		t.Errorf("Unexpected private key file: Expected=\"%s\", Got=\"%s\"", fakeCfg.PrivateKeys[0], cfg.PrivateKeys[0])
+	}
+	if cfg.LogLevel != "info" {
+		t.Errorf("Unexpected loglevel: Expected=info, Got=\"%s\"", cfg.LogLevel)
 	}
 }
 

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"flag"
 	"io/ioutil"
 	"os"
@@ -26,28 +27,33 @@ type Config struct {
 	SSHUser     string   `yaml:"ssh_user"`
 }
 
-func NewConfig() *Config {
-	progPath := expandTilde("~/userlist")
-	return &Config{
-		LogFile:    path.Join(progPath, "userlist.log"),
-		LogLevel:   "Info",
-		OutFileCSV: path.Join(progPath, "userlist.csv"),
-		SSHTimeout: "10s",
-	}
-}
-
 func ParseConfig(filename string) (*Config, error) {
-	config := NewConfig()
-	if filename != "" {
-		file, err := os.Open(filename)
-		if err != nil {
-			return nil, err
-		}
-		defer file.Close()
-		d := yaml.NewDecoder(file)
-		if err := d.Decode(&config); err != nil {
-			return nil, err
-		}
+	config := new(Config)
+	file, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	d := yaml.NewDecoder(file)
+	if err := d.Decode(&config); err != nil {
+		return nil, err
+	}
+	// We can safely make a guess at loglevel and SSH timeout
+	if config.LogLevel == "" {
+		config.LogLevel = "info"
+	}
+	if config.SSHTimeout == "" {
+		config.SSHTimeout = "10s"
+	}
+	if config.ServerList == "" {
+		return nil, errors.New("server_list is not defined")
+	}
+	if config.SSHUser == "" {
+		return nil, errors.New("ssh_user is not defined")
+	}
+	// Iterate over the given Private keys and expand tildes
+	for n := range config.PrivateKeys {
+		config.PrivateKeys[n] = expandTilde(config.PrivateKeys[n])
 	}
 	return config, nil
 }

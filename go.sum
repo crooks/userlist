@@ -3,6 +3,8 @@ github.com/coreos/go-systemd v0.0.0-20191104093116-d3cd4ed1dbcf h1:iW4rZ826su+pq
 github.com/coreos/go-systemd v0.0.0-20191104093116-d3cd4ed1dbcf/go.mod h1:F5haX7vjVVG0kc13fIWeqUViNPyEJxv/OmvnBo0Yme4=
 github.com/crooks/jlog v0.0.0-20220719221124-6ebc00b9f103 h1:jyix/ilNvX2OySoh+GGgXLCRM6VB81jwJp60fT8Vxnk=
 github.com/crooks/jlog v0.0.0-20220719221124-6ebc00b9f103/go.mod h1:ENxM1oEacZizBcU0jOcjzrTLighhIWdKvnwYQO5/360=
+github.com/crooks/jlog v0.0.0-20220722131440-a145743cbde6 h1:oJngL+uRfHR4FjULvYoD9OH0xeRihYiwvyJfziICTbI=
+github.com/crooks/jlog v0.0.0-20220722131440-a145743cbde6/go.mod h1:ENxM1oEacZizBcU0jOcjzrTLighhIWdKvnwYQO5/360=
 github.com/crooks/log-go v0.4.2 h1:rl/nJqPREYDsv/YwmMwHkWT+JUOFJO4IjgOB2R22duU=
 github.com/crooks/log-go v0.4.2/go.mod h1:xPgU2yZAUbQCkvzB2I8OaqV5OFqOmq907g++YvJDL5Y=
 github.com/crooks/sshcmds v0.0.0-20201114194206-3279c632edf8 h1:TM3hKfnqzRdW1XGoou8FipXhNiiQ0mrQT3myJh/eps8=
