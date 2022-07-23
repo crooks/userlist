@@ -24,8 +24,10 @@ var (
 )
 
 type hostsInfo struct {
-	users    map[string]map[string]userInfo
-	allUsers []string
+	hostNames []string
+	users     map[string]map[string]userInfo
+	allUsers  []string
+	uidMap    map[int][]string
 }
 
 type userInfo struct {
@@ -213,6 +215,65 @@ func (h *hostsInfo) parseLast(hostName string, b bytes.Buffer) {
 	}
 }
 
+// nonBlankName iterates through all known hosts looking for a specified
+// userName.  If it finds one, it checks that the corresponding name field in
+// the users struct (The comments field in /etc/passwd) is not blank.  If this
+// is true, the name is returned as a string.
+func (h *hostsInfo) nonBlankName(userName string) string {
+	for _, host := range h.hostNames {
+		// Test if this host has an entry for the specified userName
+		if _, ok := h.users[host][userName]; ok {
+			if len(h.users[host][userName].name) > 0 {
+				// The userName is good and the name field has some content.
+				return h.users[host][userName].name
+			}
+		}
+	}
+	// Give up.  Unlikely as it seems, no hits were found.
+	return ""
+}
+
+// writeMapToFile produces two files.  One of conflicting UIDs and one of
+// correct, unique UIDs.
+func (h *hostsInfo) writeMapToFile(collisionsCSV, mapCSV string) {
+	// Create and open the UID Collisions file
+	csvc, err := os.Create(collisionsCSV)
+	if err != nil {
+		log.Fatalf("Unable to write output: %s", err)
+	}
+	defer csvc.Close()
+	bufc := bufio.NewWriter(csvc)
+	// Create and open the UID Map file
+	csvm, err := os.Create(mapCSV)
+	if err != nil {
+		log.Fatalf("Unable to write output: %s", err)
+	}
+	defer csvm.Close()
+	bufm := bufio.NewWriter(csvm)
+	// Create a slice of uid keys for sorting purposes
+	keys := make([]int, 0, len(h.uidMap))
+	for k := range h.uidMap {
+		keys = append(keys, k)
+	}
+	sort.Ints(keys)
+	// Iterate through all the discovered UIDs.  If there is >1 associated
+	// userNames, write the UID to file.
+	for _, uid := range keys {
+		if len(h.uidMap[uid]) > 1 {
+			// UID collisions
+			line := fmt.Sprintf("%d,%s\n", uid, strings.Join(h.uidMap[uid], ","))
+			bufc.WriteString(line)
+		} else {
+			// Good UIDs
+			userName := h.uidMap[uid][0]
+			line := fmt.Sprintf("%d,%s,%s\n", uid, userName, h.nonBlankName(userName))
+			bufm.WriteString(line)
+		}
+	}
+	bufc.Flush()
+	bufm.Flush()
+}
+
 // writeToFile exports the map of hosts/users to a CSV file.
 func (h *hostsInfo) writeToFile(filename string) {
 	f, err := os.Create(filename)
@@ -360,4 +421,5 @@ func main() {
 
 	// Write the gathered user data to a file
 	hosts.writeToFile(cfg.OutFileCSV)
+	hosts.writeMapToFile(cfg.CollisionsCSV, cfg.UIDMapCSV)
 }

@@ -18,13 +18,15 @@ type Flags struct {
 
 //Config contains the userlist configuration options
 type Config struct {
-	LogFile     string   `yaml:"logfile"`
-	LogLevel    string   `yaml:"loglevel"`
-	OutFileCSV  string   `yaml:"outfile"`
-	PrivateKeys []string `yaml:"private_keys"`
-	ServerList  string   `yaml:"server_list"`
-	SSHTimeout  string   `yaml:"ssh_timeout"`
-	SSHUser     string   `yaml:"ssh_user"`
+	CollisionsCSV string   `yaml:"collisions_file"`
+	LogFile       string   `yaml:"logfile"`
+	LogLevel      string   `yaml:"loglevel"`
+	OutFileCSV    string   `yaml:"outfile"`
+	PrivateKeys   []string `yaml:"private_keys"`
+	ServerList    string   `yaml:"server_list"`
+	SSHTimeout    string   `yaml:"ssh_timeout"`
+	SSHUser       string   `yaml:"ssh_user"`
+	UIDMapCSV     string   `yaml:"uidmap_file"`
 }
 
 func ParseConfig(filename string) (*Config, error) {
