@@ -318,27 +318,12 @@ func (h *hostsInfo) writeToFile(filename string) {
 	w.Flush()
 }
 
-func main() {
-	var err error
-	// Reading the config has to happen first.  It determines the loglevel and
-	// logpath.
-	flags = config.ParseFlags()
-	cfg, err = config.ParseConfig(flags.Config)
-	if err != nil {
-		log.Fatalf("Unable to parse config: %v", err)
-	}
-
-	loglevel, err := log.ParseLevel(cfg.LogLevel)
-	if err != nil {
-		log.Fatalf("Unable to parse log level: %v", err)
-	}
-	log.Current = jlog.NewJournal(loglevel)
-
-	hosts := newHosts(cfg.ServerList)
-	var b bytes.Buffer
+// readPrivateKeys takes a slice of filenames relating to SSH private key files.
+// It returns an instance of sshcmds populated with valid private keys.
+func readPrivateKeys(keyFileNames []string) *sshcmds.Config {
 	sshSession := sshcmds.NewConfig()
 	validKeys := 0
-	for _, k := range cfg.PrivateKeys {
+	for _, k := range keyFileNames {
 		err := sshSession.AddKey(cfg.SSHUser, k)
 		if err != nil {
 			log.Warnf("%s: %s", k, err)
@@ -352,6 +337,31 @@ func main() {
 	} else {
 		log.Fatal("No valid private keys found")
 	}
+	return sshSession
+}
+
+func main() {
+	var err error
+	// Reading the config has to happen first.  It determines the loglevel and
+	// logpath.
+	flags = config.ParseFlags()
+	cfg, err = config.ParseConfig(flags.Config)
+	if err != nil {
+		log.Fatalf("Unable to parse config: %v", err)
+	}
+	// With a config in place, logging can now be configured.
+	loglevel, err := log.ParseLevel(cfg.LogLevel)
+	if err != nil {
+		log.Fatalf("Unable to parse log level: %v", err)
+	}
+	log.Current = jlog.NewJournal(loglevel)
+
+	// Create an sshSession and import Private keys into it.
+	sshSession := readPrivateKeys(cfg.PrivateKeys)
+
+	// Create a new instance of hostsInfo
+	hosts := newHosts(cfg.ServerList)
+	var b bytes.Buffer
 	hostsParsed := 0
 	HostsSuccess := 0
 	totalT0 := time.Now()
