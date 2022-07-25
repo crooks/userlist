@@ -21,7 +21,7 @@ type Config struct {
 	CollisionsCSV string   `yaml:"collisions_file"`
 	LogFile       string   `yaml:"logfile"`
 	LogLevel      string   `yaml:"loglevel"`
-	OutFileCSV    string   `yaml:"outfile"`
+	OutFileCSV    string   `yaml:"out_file"`
 	PrivateKeys   []string `yaml:"private_keys"`
 	ServerList    string   `yaml:"server_list"`
 	SSHTimeout    string   `yaml:"ssh_timeout"`
@@ -40,13 +40,27 @@ func ParseConfig(filename string) (*Config, error) {
 	if err := d.Decode(&config); err != nil {
 		return nil, err
 	}
-	// We can safely make a guess at loglevel and SSH timeout
+	// We can safely make a guess at some config options
 	if config.LogLevel == "" {
 		config.LogLevel = "info"
 	}
 	if config.SSHTimeout == "" {
 		config.SSHTimeout = "10s"
 	}
+	if config.CollisionsCSV == "" {
+		config.CollisionsCSV = "uid_conflict.csv"
+	}
+	if config.OutFileCSV == "" {
+		config.OutFileCSV = "userlist.csv"
+	}
+	if config.UIDMapCSV == "" {
+		config.UIDMapCSV = "uid_map.csv"
+	}
+	// Allow for tilde expansion on these config options
+	config.CollisionsCSV = expandTilde(config.CollisionsCSV)
+	config.OutFileCSV = expandTilde(config.OutFileCSV)
+	config.UIDMapCSV = expandTilde(config.UIDMapCSV)
+	// Others cannot be guessed and must be user defined
 	if config.ServerList == "" {
 		return nil, errors.New("server_list is not defined")
 	}

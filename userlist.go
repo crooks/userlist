@@ -239,14 +239,14 @@ func (h *hostsInfo) writeMapToFile(collisionsCSV, mapCSV string) {
 	// Create and open the UID Collisions file
 	csvc, err := os.Create(collisionsCSV)
 	if err != nil {
-		log.Fatalf("Unable to write output: %s", err)
+		log.Fatalf("Unable to write collisionsCSV: %s", err)
 	}
 	defer csvc.Close()
 	bufc := bufio.NewWriter(csvc)
 	// Create and open the UID Map file
 	csvm, err := os.Create(mapCSV)
 	if err != nil {
-		log.Fatalf("Unable to write output: %s", err)
+		log.Fatalf("Unable to write mapCSV: %s", err)
 	}
 	defer csvm.Close()
 	bufm := bufio.NewWriter(csvm)
@@ -278,7 +278,7 @@ func (h *hostsInfo) writeMapToFile(collisionsCSV, mapCSV string) {
 func (h *hostsInfo) writeToFile(filename string) {
 	f, err := os.Create(filename)
 	if err != nil {
-		log.Fatalf("Unable to write output: %s", err)
+		log.Fatalf("Unable to write OutFileCSV: %s", err)
 	}
 	defer f.Close()
 	w := bufio.NewWriter(f)
