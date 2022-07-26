@@ -67,11 +67,37 @@ func ParseConfig(filename string) (*Config, error) {
 	if config.SSHUser == "" {
 		return nil, errors.New("ssh_user is not defined")
 	}
+	// Check if the various output files are writable.  It's much less overhead
+	// to find out now instead of during post-processing.
+	err = touchAndDel(config.CollisionsCSV)
+	if err != nil {
+		return nil, err
+	}
+	err = touchAndDel(config.OutFileCSV)
+	if err != nil {
+		return nil, err
+	}
+	err = touchAndDel(config.UIDMapCSV)
+	if err != nil {
+		return nil, err
+	}
 	// Iterate over the given Private keys and expand tildes
 	for n := range config.PrivateKeys {
 		config.PrivateKeys[n] = expandTilde(config.PrivateKeys[n])
 	}
 	return config, nil
+}
+
+// touchAndDel creates and then removes a file.  This is a quick and dirty test
+// to see if a given filename can be written.
+func touchAndDel(filename string) error {
+	file, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	file.Close()
+	defer os.Remove(filename)
+	return nil
 }
 
 // parseFlags processes arguments passed on the command line in the format
