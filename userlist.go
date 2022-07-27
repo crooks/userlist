@@ -118,6 +118,7 @@ func (h *hostsInfo) parsePasswd(hostName string, b bytes.Buffer) {
 			log.Warnf("%s: UID cannot be converted to integer", fields[2])
 			continue
 		}
+		// Populate the UID Map
 		if !stringInSlice(userName, h.uidMap[uid]) {
 			log.Debugf("%d: Adding %s to UID map", uid, userName)
 			h.uidMap[uid] = append(h.uidMap[uid], userName)
