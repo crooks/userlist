@@ -52,9 +52,10 @@ func newUser(uid int, passwd, name, shell string) *userInfo {
 
 // newHosts constructs a new instance of hostsInfo
 func newHosts(hostFile string) *hostsInfo {
-	h := new(hostsInfo)
-	h.users = make(map[string]map[string]userInfo)
-	return h
+	return &hostsInfo{
+		users:  make(map[string]map[string]userInfo),
+		uidMap: make(map[int][]string),
+	}
 }
 
 // stringInSlice returns true if string(s) is a member of slice(list).
@@ -117,6 +118,10 @@ func (h *hostsInfo) parsePasswd(hostName string, b bytes.Buffer) {
 			log.Warnf("%s: UID cannot be converted to integer", fields[2])
 			continue
 		}
+		if !stringInSlice(userName, h.uidMap[uid]) {
+			log.Debugf("%d: Adding %s to UID map", uid, userName)
+			h.uidMap[uid] = append(h.uidMap[uid], userName)
+		}
 		// Make a (hopefully not too bold) choice that the first (CSV)
 		// comment field is the user's real name.
 		name := strings.Split(fields[4], ",")[0]
@@ -162,7 +167,7 @@ func (h *hostsInfo) parseShadow(hostName string, b bytes.Buffer) {
 		pwchg, err := stringToEpoch(fields[2])
 		if err != nil {
 			log.Warnf(
-				"Hostname=%s, User=%s: Unable to parse Epoch of: %s",
+				"Hostname=%s, User=%s, Filename=/etc/shadow: Unable to parse Epoch of: %s",
 				hostName,
 				user,
 				fields[2],
