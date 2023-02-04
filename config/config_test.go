@@ -1,14 +1,13 @@
 package config
 
 import (
-	"io/ioutil"
 	"os"
 	"path"
 	"testing"
 )
 
 func TestConfig(t *testing.T) {
-	testFile, err := ioutil.TempFile("/tmp", "testcfg")
+	testFile, err := os.CreateTemp("", "testcfg")
 	if err != nil {
 		t.Fatalf("Unable to create TempFile: %v", err)
 	}
@@ -16,12 +15,15 @@ func TestConfig(t *testing.T) {
 	fakeCfg := new(Config)
 	fakeKey := path.Join(expandTilde("~"), ".ssh/ed25519")
 	fakeCfg.PrivateKeys = []string{fakeKey}
-	fakeCfg.ServerList = "dummy"
+	fakeCfg.Sources.Servers = append(fakeCfg.Sources.Servers, "dummyServer")
 	fakeCfg.SSHUser = "dummy"
 	fakeCfg.WriteConfig(testFile.Name())
 	cfg, err := ParseConfig(testFile.Name())
 	if err != nil {
 		t.Fatalf("Unable to parse config: %v", err)
+	}
+	if cfg.Sources.Servers[0] != "dummyServer" {
+		t.Errorf("Expect source of %s.  Got %s", fakeCfg.Sources.Servers[0], cfg.Sources.Servers[0])
 	}
 	if len(cfg.PrivateKeys) != 1 {
 		t.Errorf("Expected a single default private key. Got %d.", len(cfg.PrivateKeys))

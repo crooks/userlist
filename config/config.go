@@ -3,7 +3,6 @@ package config
 import (
 	"errors"
 	"flag"
-	"io/ioutil"
 	"os"
 	"os/user"
 	"path"
@@ -16,17 +15,21 @@ type Flags struct {
 	Config string
 }
 
-//Config contains the userlist configuration options
+// Config contains the userlist configuration options
 type Config struct {
 	CollisionsCSV string   `yaml:"collisions_file"`
 	LogFile       string   `yaml:"logfile"`
 	LogLevel      string   `yaml:"loglevel"`
 	OutFileCSV    string   `yaml:"out_file"`
 	PrivateKeys   []string `yaml:"private_keys"`
-	ServerList    string   `yaml:"server_list"`
 	SSHTimeout    string   `yaml:"ssh_timeout"`
 	SSHUser       string   `yaml:"ssh_user"`
 	UIDMapCSV     string   `yaml:"uidmap_file"`
+	Sources       struct {
+		URLs    []string `yaml:"urls"`
+		Files   []string `yaml:"files"`
+		Servers []string `yaml:"servers"`
+	} `yaml:"sources"`
 }
 
 func ParseConfig(filename string) (*Config, error) {
@@ -61,8 +64,8 @@ func ParseConfig(filename string) (*Config, error) {
 	config.OutFileCSV = expandTilde(config.OutFileCSV)
 	config.UIDMapCSV = expandTilde(config.UIDMapCSV)
 	// Others cannot be guessed and must be user defined
-	if config.ServerList == "" {
-		return nil, errors.New("server_list is not defined")
+	if len(config.Sources.Servers)+len(config.Sources.Files)+len(config.Sources.URLs) == 0 {
+		return nil, errors.New("no sources are defined")
 	}
 	if config.SSHUser == "" {
 		return nil, errors.New("ssh_user is not defined")
@@ -115,7 +118,7 @@ func (c *Config) WriteConfig(filename string) error {
 	if err != nil {
 		return err
 	}
-	err = ioutil.WriteFile(filename, data, 0644)
+	err = os.WriteFile(filename, data, 0644)
 	if err != nil {
 		return err
 	}
