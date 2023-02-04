@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"sort"
@@ -28,6 +27,8 @@ type hostsInfo struct {
 	users     map[string]map[string]userInfo
 	allUsers  []string
 	uidMap    map[int][]string
+	parsed    int // Number of hosts processed
+	success   int // Number of hosts successfully processed
 }
 
 type userInfo struct {
@@ -51,7 +52,7 @@ func newUser(uid int, passwd, name, shell string) *userInfo {
 }
 
 // newHosts constructs a new instance of hostsInfo
-func newHosts(hostFile string) *hostsInfo {
+func newHosts() *hostsInfo {
 	return &hostsInfo{
 		users:  make(map[string]map[string]userInfo),
 		uidMap: make(map[int][]string),
@@ -346,6 +347,86 @@ func readPrivateKeys(keyFileNames []string) *sshcmds.Config {
 	return sshSession
 }
 
+func (hosts *hostsInfo) parseHost(hostName string, sshcfg sshcmds.Config) {
+	hosts.parsed++
+	hostShort := strings.Split(hostName, ".")[0]
+	log.Infof("Processing host: %s", hostShort)
+	hostT0 := time.Now()
+	client, err := sshcfg.Auth(hostShort)
+	if err != nil {
+		log.Warnf("%s: SSH authentication returned: %s", hostName, err)
+		return
+	}
+	defer client.Close()
+	var b bytes.Buffer
+	b, err = sshcfg.Cmd(client, "cat /etc/passwd")
+	if err != nil {
+		log.Warnf("%s: Unable to parse /etc/passwd: %v", hostName, err)
+		return
+	}
+	hosts.parsePasswd(hostShort, b)
+
+	b, err = sshcfg.Cmd(client, "sudo cat /etc/shadow")
+	if err != nil {
+		log.Infof("%s: Cannot parse /etc/shadow: %v", hostName, err)
+	} else {
+		hosts.parseShadow(hostShort, b)
+	}
+
+	b, err = sshcfg.Cmd(client, "last -aF")
+	if err != nil {
+		log.Infof("%s: Unable to run \"last\" command: %v", hostName, err)
+	} else {
+		hosts.parseLast(hostShort, b)
+	}
+
+	hostT1 := time.Now()
+	hostDuration := hostT1.Sub(hostT0)
+	hosts.success++
+	log.Debugf(
+		"%s: Parsed in %.2f seconds",
+		hostShort,
+		hostDuration.Seconds(),
+	)
+}
+
+func (hosts *hostsInfo) parseSources() {
+	// Create an sshSession and import Private keys into it.
+	sshSession := readPrivateKeys(cfg.PrivateKeys)
+
+	// Iterate over a list of URLs that contain hostnames
+	for _, s := range cfg.Sources.URLs {
+		url, err := http.Get(s)
+		if err != nil {
+			log.Warnf("Error parsing URL %s: %v", s, err)
+			continue
+		}
+		defer url.Body.Close()
+		scanner := bufio.NewScanner(url.Body)
+		// Iterate over the lines within a given URL
+		for scanner.Scan() {
+			hosts.parseHost(scanner.Text(), *sshSession)
+		}
+	}
+	// Iterate over a list of files that contain hostnames
+	for _, s := range cfg.Sources.Files {
+		f, err := os.Open(s)
+		if err != nil {
+			log.Warnf("Error parsing file %s: %v", s, err)
+		}
+		defer f.Close()
+		scanner := bufio.NewScanner(f)
+		// Iterate over the lines within a given file
+		for scanner.Scan() {
+			hosts.parseHost(scanner.Text(), *sshSession)
+		}
+	}
+	// Iterate over a simple list of hostnames
+	for _, s := range cfg.Sources.Servers {
+		hosts.parseHost(s, *sshSession)
+	}
+}
+
 func main() {
 	var err error
 	// Reading the config has to happen first.  It determines the loglevel and
@@ -362,76 +443,17 @@ func main() {
 	}
 	log.Current = jlog.NewJournal(loglevel)
 
-	// Create an sshSession and import Private keys into it.
-	sshSession := readPrivateKeys(cfg.PrivateKeys)
-
 	// Create a new instance of hostsInfo
-	hosts := newHosts(cfg.ServerList)
-	var b bytes.Buffer
-	hostsParsed := 0
-	HostsSuccess := 0
+	hosts := newHosts()
+
 	totalT0 := time.Now()
-	var source io.ReadCloser
-	if strings.HasPrefix(cfg.ServerList, "http://") || strings.HasPrefix(cfg.ServerList, "https://") {
-		url, err := http.Get(cfg.ServerList)
-		if err != nil {
-			log.Fatalf("Unable to read hosts URL: %v", err)
-		}
-		source = url.Body
-	} else {
-		source, err = os.Open(cfg.ServerList)
-		if err != nil {
-			log.Fatalf("Unable to open hosts file: %v", err)
-		}
-	}
-	defer source.Close()
-	scanner := bufio.NewScanner(source)
-	for scanner.Scan() {
-		hostsParsed++
-		hostShort := strings.Split(scanner.Text(), ".")[0]
-		log.Infof("Processing host: %s", hostShort)
-		hostT0 := time.Now()
-		client, err := sshSession.Auth(hostShort)
-		if err != nil {
-			log.Warnf("SSH authentication returned: %s", err)
-			continue
-		}
-		b, err = sshSession.Cmd(client, "cat /etc/passwd")
-		if err != nil {
-			log.Warnf("%s", err)
-			continue
-		}
-		hosts.parsePasswd(hostShort, b)
-
-		b, err = sshSession.Cmd(client, "sudo cat /etc/shadow")
-		if err != nil {
-			log.Warnf("%s", err)
-			continue
-		}
-		hosts.parseShadow(hostShort, b)
-
-		b, err = sshSession.Cmd(client, "last -aF")
-		if err != nil {
-			log.Warnf("%s", err)
-			continue
-		}
-		client.Close()
-		hosts.parseLast(hostShort, b)
-		hostT1 := time.Now()
-		hostDuration := hostT1.Sub(hostT0)
-		HostsSuccess++
-		log.Infof(
-			"%s: Parsed in %.2f seconds",
-			hostShort,
-			hostDuration.Seconds(),
-		)
-	}
+	hosts.parseSources()
 	totalT1 := time.Now()
 	totalDuration := totalT1.Sub(totalT0)
 	log.Infof(
 		"Successfully parsed %d hosts out of %d in %.1f seconds",
-		HostsSuccess,
-		hostsParsed,
+		hosts.success,
+		hosts.parsed,
 		totalDuration.Seconds(),
 	)
 
