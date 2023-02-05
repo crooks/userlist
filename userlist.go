@@ -32,13 +32,13 @@ type hostsInfo struct {
 }
 
 type userInfo struct {
-	uid    int
-	passwd string
-	name   string
-	shell  string
-	last   time.Time
-	pwchg  time.Time
-	hash   string
+	uid              int
+	passwd           string
+	name             string
+	shell            string
+	lastLoginDate    time.Time
+	passwdChangeDate time.Time
+	hash             string
 }
 
 // newUser returns a partially populated userInfo struct
@@ -166,7 +166,7 @@ func (h *hostsInfo) parseShadow(hostName string, b bytes.Buffer) {
 		}
 
 		// Attempt to convert the third field to a Unix Epoch time
-		pwchg, err := stringToEpoch(fields[2])
+		pwChgDate, err := stringToEpoch(fields[2])
 		if err != nil {
 			log.Warnf(
 				"Hostname=%s, User=%s, Filename=/etc/shadow: Unable to parse Epoch of: %s",
@@ -182,7 +182,7 @@ func (h *hostsInfo) parseShadow(hostName string, b bytes.Buffer) {
 		_, exists := h.users[hostName][user]
 		if exists {
 			u := h.users[hostName][user]
-			u.pwchg = pwchg
+			u.passwdChangeDate = pwChgDate
 			u.hash = hash
 			h.users[hostName][user] = u
 		}
@@ -190,19 +190,19 @@ func (h *hostsInfo) parseShadow(hostName string, b bytes.Buffer) {
 }
 
 // setLast converts a date string to a Time.  If the date is more recent than
-// the previous most recent for a given user, the last date for that user is
+// the previous most recent for a given user, the lastLoginDate date for that user is
 // updated.
 func (u *userInfo) setLast(s string) {
 	lastdate, err := time.Parse("Jan 2 15:04:05 2006", s)
 	if err != nil {
 		panic(err)
 	}
-	if lastdate.After(u.last) {
-		u.last = lastdate
+	if lastdate.After(u.lastLoginDate) {
+		u.lastLoginDate = lastdate
 	}
 }
 
-// parseLast iterates through the lines returned by the "last" command.  This
+// parseLast iterates through the lines returned by the "lastLoginDate" command.  This
 // code is written for Red Hat which has a primitive output compared to other
 // Linux flavours.
 func (h *hostsInfo) parseLast(hostName string, b bytes.Buffer) {
@@ -298,25 +298,30 @@ func (h *hostsInfo) writeToFile(filename string) {
 	}
 	sort.Strings(keys)
 
-	var datestr string
-	var pwchg string
+	var lastLoginDate string
+	var passwdChangeDate string
+	// dateThreshold is a hardcoded limit on how old a date can be before it's considered invalid.
+	// This is principlally to stop 0 being treated as an Epoch date.
 	dateThreshold := time.Date(1990, 1, 1, 0, 0, 0, 0, time.UTC)
 	// Iterate over the sorted hostnames
-	//w.WriteString("host,user,uid,passwd,name,shell,lastlogin,pwhash,pwchanged\n")
 	for _, host := range keys {
 		for _, u := range h.allUsers {
 			info, exists := h.users[host][u]
 			if exists {
-				pwchg = info.pwchg.Format("2006-01-02")
-				if info.last.After(dateThreshold) {
-					datestr = info.last.Format("2006-01-02")
+				if info.passwdChangeDate.After(dateThreshold) {
+					passwdChangeDate = info.passwdChangeDate.Format("2006-01-02")
 				} else {
-					datestr = ""
+					passwdChangeDate = ""
+				}
+				if info.lastLoginDate.After(dateThreshold) {
+					lastLoginDate = info.lastLoginDate.Format("2006-01-02")
+				} else {
+					lastLoginDate = ""
 				}
 				line := fmt.Sprintf(
 					"%s,%s,%d,%s,%s,%s,%s,%s,%s\n",
 					host, u, info.uid, info.passwd, info.name, info.shell,
-					datestr, info.hash, pwchg,
+					lastLoginDate, info.hash, passwdChangeDate,
 				)
 				w.WriteString(line)
 			}
@@ -342,11 +347,12 @@ func readPrivateKeys(keyFileNames []string) *sshcmds.Config {
 	if validKeys > 0 {
 		log.Infof("Successfully imported %d private keys", validKeys)
 	} else {
-		log.Fatal("No valid private keys found")
+		log.Fatalf("No valid private keys found")
 	}
 	return sshSession
 }
 
+// parseHost runs a series of SSH commands against a given host.
 func (hosts *hostsInfo) parseHost(hostName string, sshcfg sshcmds.Config) {
 	hosts.parsed++
 	hostShort := strings.Split(hostName, ".")[0]
@@ -373,9 +379,9 @@ func (hosts *hostsInfo) parseHost(hostName string, sshcfg sshcmds.Config) {
 		hosts.parseShadow(hostShort, b)
 	}
 
-	b, err = sshcfg.Cmd(client, "last -aF")
+	b, err = sshcfg.Cmd(client, "lastLoginDate -aF")
 	if err != nil {
-		log.Infof("%s: Unable to run \"last\" command: %v", hostName, err)
+		log.Infof("%s: Unable to run \"lastLoginDate\" command: %v", hostName, err)
 	} else {
 		hosts.parseLast(hostShort, b)
 	}
@@ -390,10 +396,12 @@ func (hosts *hostsInfo) parseHost(hostName string, sshcfg sshcmds.Config) {
 	)
 }
 
+// parseSources iterates through a series of hostnames collected from URLs, files and/or a simple list.
 func (hosts *hostsInfo) parseSources() {
 	// Create an sshSession and import Private keys into it.
 	sshSession := readPrivateKeys(cfg.PrivateKeys)
 
+	totalT0 := time.Now()
 	// Iterate over a list of URLs that contain hostnames
 	for _, s := range cfg.Sources.URLs {
 		url, err := http.Get(s)
@@ -425,6 +433,14 @@ func (hosts *hostsInfo) parseSources() {
 	for _, s := range cfg.Sources.Servers {
 		hosts.parseHost(s, *sshSession)
 	}
+	totalT1 := time.Now()
+	totalDuration := totalT1.Sub(totalT0)
+	log.Infof(
+		"Successfully parsed %d hosts out of %d in %.1f seconds",
+		hosts.success,
+		hosts.parsed,
+		totalDuration.Seconds(),
+	)
 }
 
 func main() {
@@ -445,18 +461,8 @@ func main() {
 
 	// Create a new instance of hostsInfo
 	hosts := newHosts()
-
-	totalT0 := time.Now()
+	// This is where all the work happens
 	hosts.parseSources()
-	totalT1 := time.Now()
-	totalDuration := totalT1.Sub(totalT0)
-	log.Infof(
-		"Successfully parsed %d hosts out of %d in %.1f seconds",
-		hosts.success,
-		hosts.parsed,
-		totalDuration.Seconds(),
-	)
-
 	// Write the gathered user data to a file
 	hosts.writeToFile(cfg.OutFileCSV)
 	hosts.writeMapToFile(cfg.CollisionsCSV, cfg.UIDMapCSV)
