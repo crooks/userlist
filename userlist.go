@@ -379,9 +379,9 @@ func (hosts *hostsInfo) parseHost(hostName string, sshcfg sshcmds.Config) {
 		hosts.parseShadow(hostShort, b)
 	}
 
-	b, err = sshcfg.Cmd(client, "lastLoginDate -aF")
+	b, err = sshcfg.Cmd(client, "last -aF")
 	if err != nil {
-		log.Infof("%s: Unable to run \"lastLoginDate\" command: %v", hostName, err)
+		log.Infof("%s: Unable to run \"last\" command: %v", hostName, err)
 	} else {
 		hosts.parseLast(hostShort, b)
 	}
