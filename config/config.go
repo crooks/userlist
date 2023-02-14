@@ -13,6 +13,7 @@ import (
 
 type Flags struct {
 	Config string
+	PWOnly bool
 }
 
 // Config contains the userlist configuration options
@@ -108,6 +109,7 @@ func touchAndDel(filename string) error {
 func ParseFlags() *Flags {
 	f := new(Flags)
 	flag.StringVar(&f.Config, "config", "userlist.yml", "Path to userlist configuration file")
+	flag.BoolVar(&f.PWOnly, "pwonly", false, "Exclude entries without passwords")
 	flag.Parse()
 	return f
 }

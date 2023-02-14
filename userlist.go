@@ -13,6 +13,7 @@ import (
 
 	"github.com/Masterminds/log-go"
 	"github.com/crooks/jlog"
+	loglevel "github.com/crooks/log-go-level"
 	"github.com/crooks/sshcmds"
 	"github.com/crooks/userlist/config"
 )
@@ -308,6 +309,11 @@ func (h *hostsInfo) writeToFile(filename string) {
 		for _, u := range h.allUsers {
 			info, exists := h.users[host][u]
 			if exists {
+				// Ignore entries without passwords set.  In AIX land, this is determined by an asterisk in the passwd
+				// field.  In Linux, it's the lack of a hash on the corresponding /etc/shadow entry.
+				if flags.PWOnly && (info.passwd == "*" || info.hash == "N/A") {
+					continue
+				}
 				if info.passwdChangeDate.After(dateThreshold) {
 					passwdChangeDate = info.passwdChangeDate.Format("2006-01-02")
 				} else {
@@ -453,11 +459,11 @@ func main() {
 		log.Fatalf("Unable to parse config: %v", err)
 	}
 	// With a config in place, logging can now be configured.
-	loglevel, err := log.ParseLevel(cfg.LogLevel)
+	loglev, err := loglevel.ParseLevel(cfg.LogLevel)
 	if err != nil {
 		log.Fatalf("Unable to parse log level: %v", err)
 	}
-	log.Current = jlog.NewJournal(loglevel)
+	log.Current = jlog.NewJournal(loglev)
 
 	// Create a new instance of hostsInfo
 	hosts := newHosts()
