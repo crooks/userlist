@@ -19,6 +19,7 @@ type Flags struct {
 // Config contains the userlist configuration options
 type Config struct {
 	CollisionsCSV string   `yaml:"collisions_file"`
+	DefaultDomain string   `yaml:"default_domain"`
 	LogFile       string   `yaml:"logfile"`
 	LogLevel      string   `yaml:"loglevel"`
 	OutFileCSV    string   `yaml:"out_file"`

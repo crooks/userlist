@@ -81,6 +81,26 @@ func stringToEpoch(s string) (time.Time, error) {
 	return time.Unix(days*3600*24, 0), nil
 }
 
+// shortName takes a hostname string and decides if it should be treated as a shotname or an FQDN.
+func shortName(fqdn, defaultDomain string) string {
+	// split hostname.domain.foo into ["hostname", "domain.foo"]
+	fqdnElements := strings.SplitN(fqdn, ".", 2)
+	// SplitAfterN leaves the separator in element 0
+	hostname := fqdnElements[0]
+	if len(fqdnElements) == 1 {
+		// We received a shortname.  Return all of it.
+		return hostname
+	} else if len(fqdnElements) != 2 {
+		log.Fatalf("%s: Unexpected elements in hostname.  Expected=2, Got=%d", fqdn, len(fqdnElements))
+	}
+	domain := strings.TrimLeft(fqdnElements[1], ".")
+	if domain == defaultDomain {
+		// This is our default domain so return the shortname.
+		return hostname
+	}
+	return fmt.Sprintf("%s.%s", hostname, domain)
+}
+
 // parsePasswd extracts the required fields from the /etc/passwd file and
 // populates a userInfo map for each line in it.  Note: This function
 // initialises a users struct for each user found.  Subsequent functions will
@@ -359,47 +379,43 @@ func readPrivateKeys(keyFileNames []string) *sshcmds.Config {
 }
 
 // parseHost runs a series of SSH commands against a given host.
-func (hosts *hostsInfo) parseHost(hostName string, sshcfg sshcmds.Config) {
+func (hosts *hostsInfo) parseHost(inventoryHostName string, sshcfg sshcmds.Config) {
 	hosts.parsed++
-	hostShort := strings.Split(hostName, ".")[0]
-	log.Infof("Processing host: %s", hostShort)
+	hostName := shortName(inventoryHostName, cfg.DefaultDomain)
+	log.Infof("Processing host: %s", hostName)
 	hostT0 := time.Now()
-	client, err := sshcfg.Auth(hostShort)
+	client, err := sshcfg.Auth(hostName)
 	if err != nil {
-		log.Warnf("%s: SSH authentication returned: %s", hostName, err)
+		log.Warnf("%s: SSH authentication returned: %s", inventoryHostName, err)
 		return
 	}
 	defer client.Close()
 	var b bytes.Buffer
 	b, err = sshcfg.Cmd(client, "cat /etc/passwd")
 	if err != nil {
-		log.Warnf("%s: Unable to parse /etc/passwd: %v", hostName, err)
+		log.Warnf("%s: Unable to parse /etc/passwd: %v", inventoryHostName, err)
 		return
 	}
-	hosts.parsePasswd(hostShort, b)
+	hosts.parsePasswd(hostName, b)
 
 	b, err = sshcfg.Cmd(client, "sudo cat /etc/shadow")
 	if err != nil {
-		log.Infof("%s: Cannot parse /etc/shadow: %v", hostName, err)
+		log.Infof("%s: Cannot parse /etc/shadow: %v", inventoryHostName, err)
 	} else {
-		hosts.parseShadow(hostShort, b)
+		hosts.parseShadow(hostName, b)
 	}
 
 	b, err = sshcfg.Cmd(client, "last -aF")
 	if err != nil {
-		log.Infof("%s: Unable to run \"last\" command: %v", hostName, err)
+		log.Infof("%s: Unable to run \"last\" command: %v", inventoryHostName, err)
 	} else {
-		hosts.parseLast(hostShort, b)
+		hosts.parseLast(hostName, b)
 	}
 
 	hostT1 := time.Now()
 	hostDuration := hostT1.Sub(hostT0)
 	hosts.success++
-	log.Debugf(
-		"%s: Parsed in %.2f seconds",
-		hostShort,
-		hostDuration.Seconds(),
-	)
+	log.Debugf("%s: Parsed in %.2f seconds", hostName, hostDuration.Seconds())
 }
 
 // parseSources iterates through a series of hostnames collected from URLs, files and/or a simple list.
